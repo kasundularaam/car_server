@@ -149,3 +149,5 @@ venv.bak/
 # and want to exclude it from the repository
 
 # End of https://www.toptal.com/developers/gitignore/api/python,flask,venv
+
+/dataset

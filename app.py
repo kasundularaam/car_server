@@ -1,83 +1,49 @@
 from flask import Flask, request, jsonify
-import os
-from io import BytesIO
-from PIL import Image
-
-import cv2
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
 import numpy as np
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = 'uploads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+# Load the model
+model = load_model('arrow_recognition_model.h5')
 
 
-@app.route('/upload', methods=['POST'])
-def upload():
-    raw_data = request.get_data()
+def predict_arrow(image_path):
+    img = load_img(image_path, target_size=(224, 224))
+    img_array = img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = img_array.astype('float32') / 255.0
 
-    image_stream = BytesIO(raw_data)
+    prediction = model.predict(img_array)[0]
+    classes = ['up', 'down', 'left', 'right']
+    predicted_class = classes[np.argmax(prediction)]
+    confidence = float(np.max(prediction))
 
-    try:
-        image = Image.open(image_stream)
-        file_path = os.path.join(UPLOAD_FOLDER, 'uploaded_image.jpg')
-        image.save(file_path, 'JPEG')
-        arrow_direction = detect_arrows(file_path)
-        return jsonify({'direction': arrow_direction}), 200
-    except Exception as e:
-        return f'An error occurred: {e}', 500
+    return predicted_class, confidence
 
 
-def detect_arrows(image_path):
-
-    image = cv2.imread(image_path)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-    edges = cv2.Canny(blurred, 50, 150)
-
-    contours, _ = cv2.findContours(
-        edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-    for cnt in contours:
-
-        epsilon = 0.03 * cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, epsilon, True)
-
-        if len(approx) >= 7:
-
-            arrow_direction = determine_arrow_direction(approx)
-            return arrow_direction
-
-    return "no"
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "WELCOME"})
 
 
-def determine_arrow_direction(approx):
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file provided'}), 400
 
-    M = cv2.moments(approx)
-    if M['m00'] == 0:
-        return "Unknown"
-    cx = int(M['m10'] / M['m00'])
-    cy = int(M['m01'] / M['m00'])
+    image = request.files['image']
+    image_path = 'temp_image.jpg'  # Temporary file to save the uploaded image
+    image.save(image_path)
 
-    directions = {"left": 0, "right": 0, "up": 0, "down": 0}
+    result, confidence = predict_arrow(image_path)
 
-    for point in approx:
-        px, py = point[0]
-        if px < cx:
-            directions["left"] += 1
-        elif px > cx:
-            directions["right"] += 1
-        if py < cy:
-            directions["up"] += 1
-        elif py > cy:
-            directions["down"] += 1
-
-    dominant_direction = max(directions, key=directions.get)
-    return dominant_direction
+    return jsonify({
+        'direction': result,
+        'confidence': confidence
+    })
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001, debug=True)
